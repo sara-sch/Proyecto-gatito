@@ -1,6 +1,6 @@
 /* 
  * File:   slaveg.c
- * Author: saras
+ * Author: saras & aleja
  *
  * Created on May 16, 2022, 4:06 PM
  */
@@ -30,21 +30,22 @@
 #define IN_MIN 0                // Valor minimo de entrada del potenciometro
 #define IN_MAX 255              // Valor máximo de entrada del potenciometro
 #define OUT_MIN 16               // Valor minimo de ancho de pulso de señal PWM
-#define OUT_MAX 80             // Valor máximo de ancho de pulso de señal PWM
+#define OUT_MAX 56             // Valor máximo de ancho de pulso de señal PWM
 /*------------------------------------------------------------------------------
  * VARIABLES 
  ------------------------------------------------------------------------------*/
 char cont_master = 0;
 char cont_slave = 0xFF;
-char cont = 0;
-char cont2 = 0;
+
+
+char pot_indicador = 0; 
 unsigned short CCPR = 0;        // Variable para almacenar ancho de pulso al hacer la interpolación lineal
+unsigned short CCPR_2 = 0;
 /*------------------------------------------------------------------------------
  * PROTOTIPO DE FUNCIONES 
  ------------------------------------------------------------------------------*/
 void setup(void);
 
-void setup(void);
 unsigned short map(uint8_t val, uint8_t in_min, uint8_t in_max, 
             unsigned short out_min, unsigned short out_max);
 /*------------------------------------------------------------------------------
@@ -52,10 +53,18 @@ unsigned short map(uint8_t val, uint8_t in_min, uint8_t in_max,
  ------------------------------------------------------------------------------*/
 void __interrupt() isr (void){
     if (PIR1bits.SSPIF){
-        CCPR = map(SSPBUF, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso variable
-        CCPR1L = (uint8_t)(CCPR>>2);    // Se guardan los 8 bits más significativos en CPR1L
-        CCP1CONbits.DC1B = CCPR & 0b11; // Se guardan los 2 bits menos significativos en DC1B
-        
+        pot_indicador = SSPBUF & 0b10000000;
+        PORTD = pot_indicador;
+        if (pot_indicador == 128 ){
+            CCPR_2 = map(SSPBUF & 127, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso variable
+            CCPR2L = (uint8_t)(CCPR_2>>1);    // Se guardan los 8 bits más significativos en CPR1L
+            CCP2CONbits.DC2B0 = CCPR_2 & 0b11; // Se guardan los 2 bits menos significativos en DC1B
+        }
+        else{
+            CCPR = map(SSPBUF, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
+            CCPR1L = (uint8_t)(CCPR>>1);    // Guardamos los 8 bits mas significativos en CPR1L
+            CCP1CONbits.DC1B = CCPR & 0b11; // Guardamos los 2 bits menos significativos en DC1B
+        }
         PIR1bits.SSPIF = 0;  // Limpiamos bandera de interrupción
     }   
     return;
@@ -80,7 +89,10 @@ void setup(void){
     TRISA = 0b00100001;
     PORTA = 0;
     
-    OSCCONbits.IRCF = 0b100;    // 1MHz
+    TRISD = 0;
+    PORTD = 0;
+    
+    OSCCONbits.IRCF = 0b011;    // 500kHz 
     OSCCONbits.SCS = 1;         // Reloj interno
     
     // Configuracion de SPI
@@ -101,25 +113,39 @@ void setup(void){
     INTCONbits.PEIE = 1;
     INTCONbits.GIE = 1;
     
-    //Config PWM
-    CCP1CON = 0; // Se apaga CCP1
-    TRISCbits.TRISC2 = 1; // RC2/CCP1 como salida deshabilitado
-    PR2 = 255; // Período de 16 ms 
+   // Configuración PWM
+    TRISCbits.TRISC2 = 1;       // Deshabilitamos salida de CCP1
+    PR2 = 155;                  // periodo de 20ms
     
-    // Config CCP
+    // Configuración CCP
+    CCP1CON = 0;                // Apagamos CCP1
     CCP1CONbits.P1M = 0;        // Modo single output
-    CCP1CONbits.CCP1M = 0b1100; // Modo PWM
+    CCP1CONbits.CCP1M = 0b1100; // PWM
     
-    CCPR1L = 61; //Ciclo de trabajo base pues se va a variar
-    CCP1CONbits.DC1B = 61 & 0b11; // Base de 1 ms ancho de pulso
+    CCPR1L = 56;
+    CCP1CONbits.DC1B0 = 56 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
     
-    PIR1bits.TMR2IF = 0;        // Limpieza de bandera del TMR2
-    T2CONbits.T2CKPS = 0b11;    // Prescaler 1:16
-    T2CONbits.TMR2ON = 1;       // Se enciende TMR2
-    while(!PIR1bits.TMR2IF);    // Se espera un ciclo del TMR2
-    PIR1bits.TMR2IF = 0;        // Limpieza de bandera del TMR2 nuevamente
+    PIR1bits.TMR2IF = 0;        // Limpiamos bandera de interrupcion del TMR2
+    T2CONbits.T2CKPS = 0b11;    // prescaler 1:16
+    T2CONbits.TMR2ON = 1;       // Encendemos TMR2
+    while(!PIR1bits.TMR2IF);    // Esperar un cliclo del TMR2
+    PIR1bits.TMR2IF = 0;        // Limpiamos bandera de interrupcion del TMR2 nuevamente
     
-    TRISCbits.TRISC2 = 0;       // Se habilita salida de PWM
+    TRISCbits.TRISC2 = 0;       // Habilitamos salida de PWM
+    
+    
+    // Configuración PWM CCP2
+    TRISCbits.TRISC1 = 1;       // Deshabilitamos salida de CCP2
+    
+    // Configuración CCP2
+    CCP2CON = 0;                // Apagamos CCP2
+    CCP2CONbits.CCP2M = 0b1100; // PWM
+    
+    CCPR2L = 56;
+    CCP2CONbits.DC2B0 = 56 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
+        
+    TRISCbits.TRISC1 = 0;       // Habilitamos salida de PWM
+    
 
 }
 
