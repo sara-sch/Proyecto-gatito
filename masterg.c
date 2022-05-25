@@ -1,6 +1,6 @@
 /* 
  * File:   masterg.c
- * Author: saras
+ * Author: saras & aleja
  *
  * Created on May 16, 2022, 3:38 PM
  */
@@ -31,10 +31,12 @@
 #define IN_MIN 0                // Valor minimo de entrada del potenciometro
 #define IN_MAX 255              // Valor máximo de entrada del potenciometro
 #define OUT_MIN 16               // Valor minimo de ancho de pulso de señal PWM
-#define OUT_MAX 80             // Valor máximo de ancho de pulso de señal PWM
+#define OUT_MAX 31             // Valor máximo de ancho de pulso de señal PWM
 /*------------------------------------------------------------------------------
  * VARIABLES 
  ------------------------------------------------------------------------------*/
+char old_pot3 = 0;
+char old_pot4 = 0;
 char pot3 = 0;
 char pot4 = 0;
 char cont_master = 0;
@@ -43,7 +45,7 @@ unsigned short CCPRB = 0;
 /*------------------------------------------------------------------------------
  * PROTOTIPO DE FUNCIONES 
  ------------------------------------------------------------------------------*/
-void setup(void);
+
 void setup(void);
 unsigned short map(uint8_t val, uint8_t in_min, uint8_t in_max, 
             unsigned short out_min, unsigned short out_max);
@@ -51,24 +53,23 @@ unsigned short map(uint8_t val, uint8_t in_min, uint8_t in_max,
  * INTERRUPCIONES 
  ------------------------------------------------------------------------------*/
 void __interrupt() isr (void){
-    
     if(PIR1bits.ADIF){              // Fue interrupción del ADC?
             if(ADCON0bits.CHS == 1){
-                CCPR = map(ADRESH, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
-                CCPR1L = (uint8_t)(CCPR>>2);    // Guardamos los 8 bits mas significativos en CPR1L
+                CCPR = map(ADRESH, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso        
+                CCPR1L = (uint8_t)(CCPR>>1);    // Guardamos los 8 bits mas significativos en CPR1L
                 CCP1CONbits.DC1B = CCPR & 0b11; // Guardamos los 2 bits menos significativos en DC1B
         }
             if(ADCON0bits.CHS == 2){            // Verificamos sea AN1 el canal seleccionado
                 CCPRB = map(ADRESH, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
-                CCPR2L = (uint8_t)(CCPRB>>2);    // Guardamos los 8 bits mas significativos en CPR2L
+                CCPR2L = (uint8_t)(CCPRB>>1);    // Guardamos los 8 bits mas significativos en CPR2L
                 CCP2CONbits.DC2B0 = CCPRB & 0b11; // Guardamos los 2 bits menos significativos en DC2B
         }
             if(ADCON0bits.CHS == 3){    // Verificamos sea AN3 el canal seleccionado
-                pot3 = ADRESH & 0b1111111;        // Mostramos ADRESH 
-            }
+                pot3 = (ADRESH>>1) & 0b1111111;        // Mostramos ADRESH 
+        }
             if(ADCON0bits.CHS == 4){    // Verificamos sea AN4 el canal seleccionado
-                pot4 = ADRESH | 0b1000000;         // Mostramos ADRESH 
-            }
+                pot4 = (ADRESH>>1) | 0b10000000;         // Mostramos ADRESH
+        }
         PIR1bits.ADIF = 0;          // Limpiamos bandera de interrupci?n
     } 
     return;
@@ -78,63 +79,65 @@ void __interrupt() isr (void){
  ------------------------------------------------------------------------------*/
 void main(void) {
     setup();
-    while(1){        
-        // ADC para pots
-        if(ADCON0bits.GO == 0){             // No hay proceso de conversion
-            if(ADCON0bits.CHS == 1){
-                ADCON0bits.CHS = 2;
+    while(1){      
+        
+            if(ADCON0bits.GO == 0){             // No hay proceso de conversion
+                if(ADCON0bits.CHS == 1){
+                    ADCON0bits.CHS = 2;
+                }
+                else if(ADCON0bits.CHS == 2){
+                    ADCON0bits.CHS = 3;
+                }
+                else if(ADCON0bits.CHS == 3){
+                    ADCON0bits.CHS = 4;
+                }
+                else if(ADCON0bits.CHS == 4){
+                    ADCON0bits.CHS = 1;
+                }
+                __delay_us(40);
+                ADCON0bits.GO = 1;              // Iniciamos proceso de conversión
             }
-            else if(ADCON0bits.CHS == 2){
-                ADCON0bits.CHS = 3;
-            }
-            else if(ADCON0bits.CHS == 3){
-                ADCON0bits.CHS = 4;
-                // cambio en el selector (SS) para generar respuesta del pic
-                PORTAbits.RA5 = 1;      // Deshabilitamos el ss del esclavo
+
+            if(pot3 != old_pot3){
+
+                PORTAbits.RA7 = 1;      // Deshabilitamos el ss del esclavo
                 __delay_ms(10);         // Delay para que el PIC pueda detectar el cambio en el pin
-                PORTAbits.RA5 = 0;      // habilitamos nuevamente el escalvo
+                PORTAbits.RA7 = 0;      // habilitamos nuevamente el escalvo
 
                 // Enviamos el dato 
                 SSPBUF = pot3;   // Cargamos valor del contador al buffer
                 while(!SSPSTATbits.BF){}
 
                 __delay_ms(100);
+                old_pot3 = pot3;
             }
-            else if(ADCON0bits.CHS == 4){
-                ADCON0bits.CHS = 0;
-                // cambio en el selector (SS) para generar respuesta del pic
-                PORTAbits.RA5 = 1;      // Deshabilitamos el ss del esclavo
+            else if(pot4 != old_pot4){
+                PORTAbits.RA7 = 1;      // Deshabilitamos el ss del esclavo
                 __delay_ms(10);         // Delay para que el PIC pueda detectar el cambio en el pin
-                PORTAbits.RA5 = 0;      // habilitamos nuevamente el escalvo
+                PORTAbits.RA7 = 0;      // habilitamos nuevamente el escalvo
 
                 // Enviamos el dato 
                 SSPBUF = pot4;   // Cargamos valor del contador al buffer
                 while(!SSPSTATbits.BF){}
 
                 __delay_ms(100);
-            }
-            __delay_us(40);
-            ADCON0bits.GO = 1;              // Iniciamos proceso de conversión
-        }
-        
-        
-    }
-    return;
+                old_pot4 = pot4;
+            }  
 }
+return;
+}
+
 /*------------------------------------------------------------------------------
  * CONFIGURACION 
  ------------------------------------------------------------------------------*/
 void setup(void){
-    ANSEL = 0b11110;
+    ANSEL = 0b101110;
     ANSELH = 0;
     
-    TRISD = 0;
-    PORTD = 0;
-    
-    TRISA = 0b00011111;
+    TRISA = 0b00101111;
     PORTA = 0;
     
-    OSCCONbits.IRCF = 0b100;    // 1MHz
+    OSCCONbits.IRCF = 0b011;    // 500kHz
     OSCCONbits.SCS = 1;         // Reloj interno
     
     // Configuracion de SPI
@@ -157,7 +160,7 @@ void setup(void){
         ADCON1bits.VCFG0 = 0;       // VDD
         ADCON1bits.VCFG1 = 0;       // VSS
         ADCON0bits.CHS = 1;    // Seleccionamos los canales
-        ADCON0bits.CHS = 2;    // Seleccionamos los canales
+        ADCON0bits.CHS = 2;    
         ADCON0bits.CHS = 3;
         ADCON0bits.CHS = 4;
         ADCON1bits.ADFM = 0;        // Justificado a la izquierda
@@ -166,15 +169,15 @@ void setup(void){
         
         // Configuración PWM
         TRISCbits.TRISC2 = 1;       // Deshabilitamos salida de CCP1
-        PR2 = 30;                  // periodo de 2ms
+        PR2 = 155;                  // periodo de 20ms
 
         // Configuración CCP
         CCP1CON = 0;                // Apagamos CCP1
         CCP1CONbits.P1M = 0;        // Modo single output
         CCP1CONbits.CCP1M = 0b1100; // PWM
 
-        CCPR1L = 16>>2;
-        CCP1CONbits.DC1B0 = 16 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
+        CCPR1L = 31;
+        CCP1CONbits.DC1B0 = 31 & 0b11;    // 2ms ancho de pulso / 25% ciclo de trabajo
 
         PIR1bits.TMR2IF = 0;        // Limpiamos bandera de interrupcion del TMR2
         T2CONbits.T2CKPS = 0b11;    // prescaler 1:16
@@ -192,8 +195,8 @@ void setup(void){
         CCP2CON = 0;                // Apagamos CCP2
         CCP2CONbits.CCP2M = 0b1100; // PWM
 
-        CCPR2L = 16>>2;
-        CCP2CONbits.DC2B0 = 16 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
+        CCPR2L = 31;
+        CCP2CONbits.DC2B0 = 31 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
 
         TRISCbits.TRISC1 = 0;       // Habilitamos salida de PWM
         
