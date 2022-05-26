@@ -40,6 +40,7 @@ char old_pot4 = 0;
 char pot3 = 0;
 char pot4 = 0;
 char cont_master = 0;
+uint8_t estado = 0;
 unsigned short CCPR = 0;        // Variable para almacenar ancho de pulso al hacer la interpolación lineal
 unsigned short CCPRB = 0;
 /*------------------------------------------------------------------------------
@@ -72,6 +73,19 @@ void __interrupt() isr (void){
         }
         PIR1bits.ADIF = 0;          // Limpiamos bandera de interrupci?n
     } 
+    
+    else if(INTCONbits.RBIF){
+        if (!RB0){
+            if (estado < 2){
+                estado++;
+            }
+            else{
+                estado = 0;
+            }
+                
+        }
+        INTCONbits.RBIF = 0;
+    }
     return;
 }
 /*------------------------------------------------------------------------------
@@ -81,6 +95,8 @@ void main(void) {
     setup();
     while(1){      
         
+        if (estado == 0){
+            PORTD = 0b001;
             if(ADCON0bits.GO == 0){             // No hay proceso de conversion
                 if(ADCON0bits.CHS == 1){
                     ADCON0bits.CHS = 2;
@@ -122,7 +138,16 @@ void main(void) {
 
                 __delay_ms(100);
                 old_pot4 = pot4;
-            }  
+            } 
+        }
+        
+        else if (estado == 1){
+            PORTD = 0b010;
+        }
+        
+        else if (estado == 2){
+            PORTD = 0b100;
+        }
 }
 return;
 }
@@ -136,6 +161,13 @@ void setup(void){
     
     TRISA = 0b00101111;
     PORTA = 0;
+    
+    TRISB = 0b111;
+    PORTB = 0;
+    
+    TRISD = 0;
+    PORTD = 0;
+    
     
     OSCCONbits.IRCF = 0b011;    // 500kHz
     OSCCONbits.SCS = 1;         // Reloj interno
@@ -205,6 +237,17 @@ void setup(void){
         PIE1bits.ADIE = 1;          // Habilitamos interrupcion de ADC
         INTCONbits.PEIE = 1;        // Habilitamos int. de perifericos
         INTCONbits.GIE = 1;         // Habilitamos int. globales
+        
+        OPTION_REGbits.nRBPU = 0;
+        WPUBbits.WPUB0 = 1;
+        WPUBbits.WPUB1 = 1;
+        WPUBbits.WPUB2 = 1;
+
+        INTCONbits.RBIE = 1;
+        IOCBbits.IOCB0 = 1;
+        IOCBbits.IOCB1 = 1;
+        IOCBbits.IOCB2 = 1;
+        INTCONbits.RBIF = 0;
 }
 
 unsigned short map(uint8_t x, uint8_t x0, uint8_t x1, 
