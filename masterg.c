@@ -37,12 +37,18 @@
  ------------------------------------------------------------------------------*/
 char old_pot3 = 0;
 char old_pot4 = 0;
+char pot1 = 0;
+char pot2 = 0;
 char pot3 = 0;
 char pot4 = 0;
 char cont_master = 0;
 uint8_t estado = 0;
 unsigned short CCPR = 0;        // Variable para almacenar ancho de pulso al hacer la interpolación lineal
 unsigned short CCPRB = 0;
+uint8_t address = 0;
+uint8_t address1 = 1;
+uint8_t address2 = 0;
+uint8_t address3 = 1;
 /*------------------------------------------------------------------------------
  * PROTOTIPO DE FUNCIONES 
  ------------------------------------------------------------------------------*/
@@ -50,18 +56,26 @@ unsigned short CCPRB = 0;
 void setup(void);
 unsigned short map(uint8_t val, uint8_t in_min, uint8_t in_max, 
             unsigned short out_min, unsigned short out_max);
+
+void datos(char data);
+void string(char *str);
+
+uint8_t read_EEPROM(uint8_t address);
+void write_EEPROM(uint8_t address, uint8_t data);
 /*------------------------------------------------------------------------------
  * INTERRUPCIONES 
  ------------------------------------------------------------------------------*/
 void __interrupt() isr (void){
     if(PIR1bits.ADIF){              // Fue interrupción del ADC?
             if(ADCON0bits.CHS == 1){
-                CCPR = map(ADRESH, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso        
+                pot1 = ADRESH;
+                CCPR = map(pot1, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso        
                 CCPR1L = (uint8_t)(CCPR>>1);    // Guardamos los 8 bits mas significativos en CPR1L
                 CCP1CONbits.DC1B = CCPR & 0b11; // Guardamos los 2 bits menos significativos en DC1B
         }
             if(ADCON0bits.CHS == 2){            // Verificamos sea AN1 el canal seleccionado
-                CCPRB = map(ADRESH, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
+                pot2 = ADRESH;
+                CCPRB = map(pot2, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
                 CCPR2L = (uint8_t)(CCPRB>>1);    // Guardamos los 8 bits mas significativos en CPR2L
                 CCP2CONbits.DC2B0 = CCPRB & 0b11; // Guardamos los 2 bits menos significativos en DC2B
         }
@@ -75,15 +89,49 @@ void __interrupt() isr (void){
     } 
     
     else if(INTCONbits.RBIF){
-        if (!RB0){
+        if (!RB0){                  // cambio de estados 
             if (estado < 2){
                 estado++;
             }
             else{
                 estado = 0;
-            }
-                
+            }   
         }
+        if (estado == 0){
+            if (!RB1){             //  grabar posiciones de ojos 
+                write_EEPROM(address, pot1);
+                __delay_ms(500);
+                write_EEPROM(address1, pot2);
+            }   
+            else if (!RB2){             //  grabar posiciones de párpados
+               write_EEPROM(address2, pot3);
+               __delay_ms(500);
+               write_EEPROM(address3, pot4);
+            } 
+            
+        }
+        else if (estado == 1){
+            if (!RB1){             //  leer posiciones de ojos 
+                pot1 = read_EEPROM(address);
+                __delay_ms(500);
+                pot2 = read_EEPROM(address1);
+                
+                CCPR = map(pot1, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso        
+                CCPR1L = (uint8_t)(CCPR>>1);    // Guardamos los 8 bits mas significativos en CPR1L
+                CCP1CONbits.DC1B = CCPR & 0b11; // Guardamos los 2 bits menos significativos en DC1B
+                
+                CCPRB = map(pot2, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
+                CCPR2L = (uint8_t)(CCPRB>>1);    // Guardamos los 8 bits mas significativos en CPR2L
+                CCP2CONbits.DC2B0 = CCPRB & 0b11; // Guardamos los 2 bits menos significativos en DC2B
+            }   
+            else if (!RB2){             //  leer posiciones de párpados
+               pot3 = read_EEPROM(address2);
+               __delay_ms(500);
+               pot4 = read_EEPROM(address3);
+               
+            }
+        }
+        
         INTCONbits.RBIF = 0;
     }
     return;
@@ -143,6 +191,32 @@ void main(void) {
         
         else if (estado == 1){
             PORTD = 0b010;
+             
+            if(pot3 != old_pot3){
+
+                PORTAbits.RA7 = 1;      // Deshabilitamos el ss del esclavo
+                __delay_ms(10);         // Delay para que el PIC pueda detectar el cambio en el pin
+                PORTAbits.RA7 = 0;      // habilitamos nuevamente el escalvo
+
+                // Enviamos el dato 
+                SSPBUF = pot3;   // Cargamos valor del contador al buffer
+                while(!SSPSTATbits.BF){}
+
+                __delay_ms(100);
+                old_pot3 = pot3;
+            }
+            else if(pot4 != old_pot4){
+                PORTAbits.RA7 = 1;      // Deshabilitamos el ss del esclavo
+                __delay_ms(10);         // Delay para que el PIC pueda detectar el cambio en el pin
+                PORTAbits.RA7 = 0;      // habilitamos nuevamente el escalvo
+
+                // Enviamos el dato 
+                SSPBUF = pot4;   // Cargamos valor del contador al buffer
+                while(!SSPSTATbits.BF){}
+
+                __delay_ms(100);
+                old_pot4 = pot4;
+            } 
         }
         
         else if (estado == 2){
@@ -162,7 +236,7 @@ void setup(void){
     TRISA = 0b00101111;
     PORTA = 0;
     
-    TRISB = 0b111;
+    TRISB = 0b1111;
     PORTB = 0;
     
     TRISD = 0;
@@ -242,15 +316,70 @@ void setup(void){
         WPUBbits.WPUB0 = 1;
         WPUBbits.WPUB1 = 1;
         WPUBbits.WPUB2 = 1;
+        WPUBbits.WPUB3 = 1;
 
         INTCONbits.RBIE = 1;
         IOCBbits.IOCB0 = 1;
         IOCBbits.IOCB1 = 1;
         IOCBbits.IOCB2 = 1;
+        IOCBbits.IOCB3 = 1;
         INTCONbits.RBIF = 0;
+        
+        //Configuración de TX y RX
+        TXSTAbits.SYNC = 0;
+        TXSTAbits.BRGH = 0;
+        BAUDCTLbits.BRG16 = 1;
+
+        SPBRG = 25;                 //SPBRGH : SPBRG = 25
+        SPBRGH = 0;
+
+        RCSTAbits.SPEN = 1;
+        RCSTAbits.RX9 = 0;          //Modo 8 bits
+        RCSTAbits.CREN = 1;         //Habilitmaos la recpeción
+        TXSTAbits.TXEN = 1;         //Habilitamos la transmisión
+        //TXSTAbits.TX9 = 0;
 }
 
 unsigned short map(uint8_t x, uint8_t x0, uint8_t x1, 
             unsigned short y0, unsigned short y1){
     return (unsigned short)(y0+((float)(y1-y0)/(x1-x0))*(x-x0));
 }
+
+void datos(char data)
+    {
+        while(TXSTAbits.TRMT == 0);
+        TXREG = data;
+    }
+
+void string (char *str){
+    while(*str != '\0'){
+        datos(*str);
+        str++;
+    }
+}
+    
+uint8_t read_EEPROM(uint8_t address){
+    EEADR = address;
+    EECON1bits.EEPGD = 0;  // Lectura en la EEPROM
+    EECON1bits.RD = 1;       // Conseguimos dato de la EEPROM
+    return EEDAT;              // Regresamos ese dato leido 
+}
+
+
+void write_EEPROM(uint8_t address, uint8_t data){
+    EEADR = address;
+    EEDAT = data;
+    EECON1bits.EEPGD = 0; // Escritura en la EEPROM
+    EECON1bits.WREN = 1;  // Habilitamos la escritura a la EEPROM
+    
+    INTCONbits.GIE = 0;    // Deshabilitamos las interrupciones
+    EECON2 = 0x55;      
+    EECON2 = 0xAA;
+    
+    EECON1bits.WR = 1;    // Se inicia la escritura
+    
+    EECON1bits.WREN = 0;     // se deshabilita escritura en la EEPROM
+    INTCONbits.RBIF = 0;
+    INTCONbits.GIE = 1;   // Habilitamos las interrupciones
+}
+    
