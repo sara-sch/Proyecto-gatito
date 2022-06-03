@@ -26,11 +26,11 @@
 /*------------------------------------------------------------------------------
  * CONSTANTES 
  ------------------------------------------------------------------------------*/
-#define _XTAL_FREQ 1000000
+#define _XTAL_FREQ 500000
 #define IN_MIN 0                // Valor minimo de entrada del potenciometro
-#define IN_MAX 255              // Valor máximo de entrada del potenciometro
-#define OUT_MIN 16               // Valor minimo de ancho de pulso de señal PWM
-#define OUT_MAX 56             // Valor máximo de ancho de pulso de señal PWM
+#define IN_MAX 127              // Valor máximo de entrada del potenciometro
+#define OUT_MIN 15               // Valor minimo de ancho de pulso de señal PWM
+#define OUT_MAX 31             // Valor máximo de ancho de pulso de señal PWM
 /*------------------------------------------------------------------------------
  * VARIABLES 
  ------------------------------------------------------------------------------*/
@@ -38,6 +38,11 @@ char cont_master = 0;
 char cont_slave = 0xFF;
 
 
+char old_pot3 = 0;
+char old_pot4 = 0;
+char pot3 = 0;
+char pot4 = 0;
+char valorpot = 0; 
 char pot_indicador = 0; 
 unsigned short CCPR = 0;        // Variable para almacenar ancho de pulso al hacer la interpolación lineal
 unsigned short CCPR_2 = 0;
@@ -53,18 +58,16 @@ unsigned short map(uint8_t val, uint8_t in_min, uint8_t in_max,
  ------------------------------------------------------------------------------*/
 void __interrupt() isr (void){
     if (PIR1bits.SSPIF){
-        pot_indicador = SSPBUF & 0b10000000;
-        PORTD = pot_indicador;
-        if (pot_indicador == 128 ){
-            CCPR_2 = map(SSPBUF & 127, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso variable
-            CCPR2L = (uint8_t)(CCPR_2>>1);    // Se guardan los 8 bits más significativos en CPR1L
-            CCP2CONbits.DC2B0 = CCPR_2 & 0b11; // Se guardan los 2 bits menos significativos en DC1B
+        valorpot = SSPBUF;
+        pot_indicador = valorpot & 0b10000000;
+        
+        if (pot_indicador == 128){
+            pot3 = valorpot & 0b01111111;
         }
         else{
-            CCPR = map(SSPBUF, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
-            CCPR1L = (uint8_t)(CCPR>>1);    // Guardamos los 8 bits mas significativos en CPR1L
-            CCP1CONbits.DC1B = CCPR & 0b11; // Guardamos los 2 bits menos significativos en DC1B
+            pot4 = valorpot & 0b01111111;
         }
+        
         PIR1bits.SSPIF = 0;  // Limpiamos bandera de interrupción
     }   
     return;
@@ -74,8 +77,21 @@ void __interrupt() isr (void){
  ------------------------------------------------------------------------------*/
 void main(void) {
     setup();
-    while(1){       
-         
+    while(1){  
+        
+        if (pot3 != old_pot3){
+            CCPR_2 = map(pot3, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso variable
+            CCPR2L = (uint8_t)(CCPR_2>>1);    // Se guardan los 8 bits más significativos en CPR1L
+            CCP2CONbits.DC2B0 = CCPR_2 & 0b11; // Se guardan los 2 bits menos significativos en DC1B
+            old_pot3 = pot3;
+        }
+        else if (pot4 != old_pot4){
+            CCPR = map(pot4, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
+            CCPR1L = (uint8_t)(CCPR>>1);    // Guardamos los 8 bits mas significativos en CPR1L
+            CCP1CONbits.DC1B = CCPR & 0b11; // Guardamos los 2 bits menos significativos en DC1B
+            old_pot4 = pot4;
+        }
+        
     }
     return;
 }
@@ -122,8 +138,8 @@ void setup(void){
     CCP1CONbits.P1M = 0;        // Modo single output
     CCP1CONbits.CCP1M = 0b1100; // PWM
     
-    CCPR1L = 56;
-    CCP1CONbits.DC1B0 = 56 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
+    CCPR1L = 31;
+    CCP1CONbits.DC1B0 = 31 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
     
     PIR1bits.TMR2IF = 0;        // Limpiamos bandera de interrupcion del TMR2
     T2CONbits.T2CKPS = 0b11;    // prescaler 1:16
@@ -141,8 +157,8 @@ void setup(void){
     CCP2CON = 0;                // Apagamos CCP2
     CCP2CONbits.CCP2M = 0b1100; // PWM
     
-    CCPR2L = 56;
-    CCP2CONbits.DC2B0 = 56 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
+    CCPR2L = 31;
+    CCP2CONbits.DC2B0 = 31 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
         
     TRISCbits.TRISC1 = 0;       // Habilitamos salida de PWM
     
