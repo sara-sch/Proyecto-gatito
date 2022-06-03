@@ -27,28 +27,37 @@
 /*------------------------------------------------------------------------------
  * CONSTANTES 
  ------------------------------------------------------------------------------*/
-#define _XTAL_FREQ 1000000
+#define _XTAL_FREQ 500000
 #define IN_MIN 0                // Valor minimo de entrada del potenciometro
 #define IN_MAX 255              // Valor máximo de entrada del potenciometro
-#define OUT_MIN 16               // Valor minimo de ancho de pulso de señal PWM
-#define OUT_MAX 31             // Valor máximo de ancho de pulso de señal PWM
+#define OUT_MIN 15               // Valor minimo de ancho de pulso de señal PWM
+#define OUT_MAX 32             // Valor máximo de ancho de pulso de señal PWM
 /*------------------------------------------------------------------------------
  * VARIABLES 
  ------------------------------------------------------------------------------*/
-char old_pot3 = 0;
+unsigned short CCPR22 = 0;       // Variables para funcionamiento de la interfaz 
+unsigned short CCPRB2 = 0;
+char old_pot3i = 0;
+char old_pot4i = 0;
+char pot3i = 0;
+char pot4i = 0;
+char indicador = 0;
+char interfaz = 0;
+
+char old_pot3 = 0;              // Variables en que se guardan valores antiguos de potenciómetros
 char old_pot4 = 0;
-char pot1 = 0;
+char pot1 = 0;                  // Variables en que se guardan valor de potenciómetro
 char pot2 = 0;
 char pot3 = 0;
 char pot4 = 0;
 char cont_master = 0;
-uint8_t estado = 0;
-unsigned short CCPR = 0;        // Variable para almacenar ancho de pulso al hacer la interpolación lineal
+uint8_t estado = 0;             // Variable de estado
+unsigned short CCPR = 0;        // Variables para almacenar ancho de pulso al hacer la interpolación lineal
 unsigned short CCPRB = 0;
-uint8_t address = 0;
+uint8_t address = 0;            // Dirección de la EEPROM en la que se almacenará
 uint8_t address1 = 1;
-uint8_t address2 = 0;
-uint8_t address3 = 1;
+uint8_t address2 = 2;
+uint8_t address3 = 3;
 /*------------------------------------------------------------------------------
  * PROTOTIPO DE FUNCIONES 
  ------------------------------------------------------------------------------*/
@@ -95,17 +104,18 @@ void __interrupt() isr (void){
             }
             else{
                 estado = 0;
-            }   
+            }  
+        __delay_ms(500);
         }
         if (estado == 0){
             if (!RB1){             //  grabar posiciones de ojos 
                 write_EEPROM(address, pot1);
-                __delay_ms(500);
+                
                 write_EEPROM(address1, pot2);
             }   
             else if (!RB2){             //  grabar posiciones de párpados
                write_EEPROM(address2, pot3);
-               __delay_ms(500);
+               
                write_EEPROM(address3, pot4);
             } 
             
@@ -130,6 +140,8 @@ void __interrupt() isr (void){
                pot4 = read_EEPROM(address3);
                
             }
+        }
+        else if(estado == 2){
         }
         
         INTCONbits.RBIF = 0;
@@ -221,6 +233,57 @@ void main(void) {
         
         else if (estado == 2){
             PORTD = 0b100;
+            
+            //while(PIR1bits.RCIF == 0);
+            interfaz = RCREG;
+            
+            
+            indicador = interfaz & 0b11;
+            
+            if(indicador == 0){
+                CCPR22 = map(interfaz, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso        
+                CCPR1L = (uint8_t)(CCPR22>>1);    // Guardamos los 8 bits mas significativos en CPR1L
+                CCP1CONbits.DC1B = CCPR22 & 0b11; // Guardamos los 2 bits menos significativos en DC1B
+            }
+            else if(indicador == 1){
+                CCPRB2 = map(interfaz, IN_MIN, IN_MAX, OUT_MIN, OUT_MAX); // Valor de ancho de pulso
+                CCPR2L = (uint8_t)(CCPRB2>>1);    // Guardamos los 8 bits mas significativos en CPR2L
+                CCP2CONbits.DC2B0 = CCPRB2 & 0b11; // Guardamos los 2 bits menos significativos en DC2B
+            }
+            else if(indicador == 2){
+                pot3i = (interfaz>>1) & 0b1111111;
+                
+                if(pot3i != old_pot3i){
+
+                    PORTAbits.RA7 = 1;      // Deshabilitamos el ss del esclavo
+                    __delay_ms(10);         // Delay para que el PIC pueda detectar el cambio en el pin
+                    PORTAbits.RA7 = 0;      // habilitamos nuevamente el escalvo
+
+                    // Enviamos el dato 
+                    SSPBUF = pot3i;   // Cargamos valor del contador al buffer
+                    while(!SSPSTATbits.BF){}
+
+                    __delay_ms(100);
+                    old_pot3i = pot3i;
+                }
+            }
+            else if(indicador == 3){
+                pot4i = (interfaz>>1) & 0b1111111;
+                
+                if(pot4i != old_pot4i){
+
+                    PORTAbits.RA7 = 1;      // Deshabilitamos el ss del esclavo
+                    __delay_ms(10);         // Delay para que el PIC pueda detectar el cambio en el pin
+                    PORTAbits.RA7 = 0;      // habilitamos nuevamente el escalvo
+
+                    // Enviamos el dato 
+                    SSPBUF = pot4i;   // Cargamos valor del contador al buffer
+                    while(!SSPSTATbits.BF){}
+
+                    __delay_ms(100);
+                    old_pot4i = pot4i;
+                }
+            }
         }
 }
 return;
@@ -282,8 +345,8 @@ void setup(void){
         CCP1CONbits.P1M = 0;        // Modo single output
         CCP1CONbits.CCP1M = 0b1100; // PWM
 
-        CCPR1L = 31;
-        CCP1CONbits.DC1B0 = 31 & 0b11;    // 2ms ancho de pulso / 25% ciclo de trabajo
+        CCPR1L = 32;
+        CCP1CONbits.DC1B0 = 32 & 0b11;    // 2ms ancho de pulso / 25% ciclo de trabajo
 
         PIR1bits.TMR2IF = 0;        // Limpiamos bandera de interrupcion del TMR2
         T2CONbits.T2CKPS = 0b11;    // prescaler 1:16
@@ -301,8 +364,8 @@ void setup(void){
         CCP2CON = 0;                // Apagamos CCP2
         CCP2CONbits.CCP2M = 0b1100; // PWM
 
-        CCPR2L = 31;
-        CCP2CONbits.DC2B0 = 31 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
+        CCPR2L = 32;
+        CCP2CONbits.DC2B0 = 32 & 0b11;    // 0.25ms ancho de pulso / 25% ciclo de trabajo
 
         TRISCbits.TRISC1 = 0;       // Habilitamos salida de PWM
         
@@ -312,11 +375,11 @@ void setup(void){
         INTCONbits.PEIE = 1;        // Habilitamos int. de perifericos
         INTCONbits.GIE = 1;         // Habilitamos int. globales
         
-        OPTION_REGbits.nRBPU = 0;
-        WPUBbits.WPUB0 = 1;
-        WPUBbits.WPUB1 = 1;
-        WPUBbits.WPUB2 = 1;
-        WPUBbits.WPUB3 = 1;
+//        OPTION_REGbits.nRBPU = 0;
+//        WPUBbits.WPUB0 = 1;
+//        WPUBbits.WPUB1 = 1;
+//        WPUBbits.WPUB2 = 1;
+//        WPUBbits.WPUB3 = 1;
 
         INTCONbits.RBIE = 1;
         IOCBbits.IOCB0 = 1;
@@ -344,19 +407,6 @@ unsigned short map(uint8_t x, uint8_t x0, uint8_t x1,
             unsigned short y0, unsigned short y1){
     return (unsigned short)(y0+((float)(y1-y0)/(x1-x0))*(x-x0));
 }
-
-void datos(char data)
-    {
-        while(TXSTAbits.TRMT == 0);
-        TXREG = data;
-    }
-
-void string (char *str){
-    while(*str != '\0'){
-        datos(*str);
-        str++;
-    }
-}
     
 uint8_t read_EEPROM(uint8_t address){
     EEADR = address;
@@ -377,7 +427,7 @@ void write_EEPROM(uint8_t address, uint8_t data){
     EECON2 = 0xAA;
     
     EECON1bits.WR = 1;    // Se inicia la escritura
-    
+    __delay_ms(500);
     EECON1bits.WREN = 0;     // se deshabilita escritura en la EEPROM
     INTCONbits.RBIF = 0;
     INTCONbits.GIE = 1;   // Habilitamos las interrupciones
